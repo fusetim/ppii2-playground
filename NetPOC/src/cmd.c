@@ -53,3 +53,24 @@ int server_kick(uint8_t* msgbuf, char* reason) {
     uint16_t length = strlen(reason) + 1;
     return build_message(msgbuf, command, length, (uint8_t*) reason);
 }
+
+int client_join(uint8_t* msgbuf) {
+    char* command = "JOIN";
+    uint16_t length = 0;
+    return build_message(msgbuf, command, length, NULL);
+}
+
+int client_move(uint8_t* msgbuf, uint16_t xpos, uint16_t ypos) {
+    char* command = "MOVE";
+    uint16_t length = 4;
+    uint8_t direction[4];
+    write_uint16(direction, xpos);
+    write_uint16(direction + 2, ypos);
+    return build_message(msgbuf, command, length, direction);
+}
+
+int client_quit(uint8_t* msgbuf) {
+    char* command = "QUIT";
+    uint16_t length = 0;
+    return build_message(msgbuf, command, length, NULL);
+}

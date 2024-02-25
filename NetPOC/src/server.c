@@ -118,6 +118,12 @@ void on_recv(ClientList* clients, int id) {
         printf("Player%d (%s) joined.\n", clients->player_table[id].id, ipstr);
         outlen = server_acpt(outgoing, clients->player_table[id].id);
         SDLNet_TCP_Send(client, outgoing, outlen);
+        for (int i = 0; i < clients->active; i++) {
+            if (i != id) {
+                outlen = server_join(outgoing, clients->player_table[i].id);
+                SDLNet_TCP_Send(client, outgoing, outlen);
+            }
+        }
         outlen = server_join(outgoing, clients->player_table[id].id);
         send_to_all(clients, outgoing, outlen);
     } else if (strcmp(cmd, "QUIT") == 0) {
