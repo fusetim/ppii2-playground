@@ -10,7 +10,10 @@ debug_server: server
 run_server: server
 	./build/server 9999
 
-client: before_build src/client.c
+run_client: client
+	./build/client 9999
+
+client: before_build lib src/client.c
 	$(CC) $(CC_FLAGS) $(CC_LIBS) -o ./build/client src/client.c ./build/deps/lib.a
 
 server: before_build lib src/server.c
