@@ -25,9 +25,7 @@ void run_server(int port);
 
 void on_recv(ClientList* clients, int id);
 
-void kick_invalid_cmd(ClientList* clients, int cid);
-
-void send_quit(ClientList* clients, int cid);
+void kill_connection(ClientList* clients, int cid);
 
 void send_to_all(ClientList* clients, uint8_t* msg, int len);
 

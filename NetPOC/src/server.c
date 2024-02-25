@@ -2,9 +2,24 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+
+#ifndef _LIB_SDL_NET_H
+#define _LIB_SDL_NET_H
 #define WITHOUT_SDL
 #include <SDL2/SDL_net.h>
-#include "server.h"
+#endif
+
+#include "../include/server.h"
+
+#ifndef _LIB_HELPER_H
+#define _LIB_HELPER_H
+#include "../include/helper.h"
+#endif
+
+#ifndef _LIB_CMD_H
+#define _LIB_CMD_H
+#include "../include/cmd.h"
+#endif
 
 int main(int argc, char const *argv[])
 {
@@ -52,7 +67,10 @@ void run_server(int port) {
                 clients.player_table[clients.active] = nplayer;
                 clients.active++;
                 SDLNet_TCP_AddSocket(clients.set, client);
-                printf("Client connected\n");
+                IPaddress* ip = SDLNet_TCP_GetPeerAddress(client);
+                char ipstr[24];
+                addrtocstr(ip, ipstr);
+                printf("new connection from: %s\n", ipstr);
             } else {
                 printf("Max clients reached\n");
                 SDLNet_TCP_Close(client);
@@ -76,54 +94,53 @@ void run_server(int port) {
 }
 
 void on_recv(ClientList* clients, int id) {
-    uint8_t buf[6];
-    uint8_t zero = 0;
-    char *cmd_str = (char*)buf;
+    uint8_t incoming[1024];
+    uint8_t outgoing[1024];
+    int outlen = 0;
+    char cmd[5];
     TCPsocket client = clients->player_table[id].sock;
-    IPaddress* address = SDLNet_TCP_GetPeerAddress(client);
-    int received = SDLNet_TCP_Recv(client, buf, 6);
-    char addr_str[24];
-    addrtocstr(address, addr_str);
-    if (received < 0) {
-        printf("Error receiving data: %s\n", SDLNet_GetError());
-        SDLNet_TCP_Close(client);
-        remove_client(clients, id);
-        send_quit(clients, id);
-    } else if (received >= 0) {
-        printf("Received: %s from %s\n", cmd_str, addr_str);
-        if (strcmp(cmd_str, "JOIN") == 0) {
-            int received = SDLNet_TCP_Recv(client, buf, 1);
-            if (received >= 1) {
-                printf("%s sent JOIN\n", addr_str);
-                uint8_t join_ack[] = {'A', 'C', 'P', 'T', 0, 1, (uint8_t) clients->player_table[id].id, '\n'};
-                SDLNet_TCP_Send(client, join_ack, 8);
-                uint8_t join_msg[] = {'J', 'O', 'I', 'N', 0, 1, (uint8_t) clients->player_table[id].id, '\n'};
-                send_to_all(clients, join_msg, 8);
-            } else {
-                printf("Received invalid command: missing newline\n");
-                kick_invalid_cmd(clients, id);
-                kill_connection(clients, id);
-                send_quit(clients, id);
-            }
-        } else if (strcmp(cmd_str, "QUIT") == 0) {
-            int received = SDLNet_TCP_Recv(client, buf, 1);
-            if (received >= 1) {
-                printf("%s sent QUIT\n", addr_str);
-                send_byee(clients, id);
-                kill_connection(clients, id);
-                send_quit(clients, id);
-            } else {
-                printf("Received invalid command: missing newline\n");
-                kick_invalid_cmd(clients, id);
-                kill_connection(clients, id);
-                send_quit(clients, id);
-            }
-        }
-    } else {
-        printf("Received invalid command\n");
-        kick_invalid_cmd(clients, id);
+    IPaddress* ip = SDLNet_TCP_GetPeerAddress(client);
+    char ipstr[24];
+    addrtocstr(ip, ipstr);
+
+    // If the message is not read correctly, kill the connection.
+    if (!read_message(incoming, client)) {
+        outlen = server_kick(outgoing, "invalid_command");
+        SDLNet_TCP_Send(client, outgoing, outlen);
+        outlen = server_quit(outgoing, clients->player_table[id].id);
         kill_connection(clients, id);
-        send_quit(clients, id);
+        send_to_all(clients, outgoing, outlen);
+        return;
+    }
+
+    read_command(incoming, cmd);
+    if (strcmp(cmd, "JOIN") == 0) {
+        printf("Player%d (%s) joined.\n", clients->player_table[id].id, ipstr);
+        outlen = server_acpt(outgoing, clients->player_table[id].id);
+        SDLNet_TCP_Send(client, outgoing, outlen);
+        outlen = server_join(outgoing, clients->player_table[id].id);
+        send_to_all(clients, outgoing, outlen);
+    } else if (strcmp(cmd, "QUIT") == 0) {
+        printf("Player%d (%s) left.\n", clients->player_table[id].id, ipstr);
+        outlen = server_byee(outgoing);
+        SDLNet_TCP_Send(client, outgoing, outlen);
+        outlen = server_quit(outgoing, clients->player_table[id].id);
+        kill_connection(clients, id);
+        send_to_all(clients, outgoing, outlen);
+    } else if (strcmp(cmd, "MOVE") == 0) {
+        uint16_t xpos, ypos;
+        xpos = read_uint16(incoming + 6);
+        ypos = read_uint16(incoming + 8);
+        printf("Player%d (%s) move to (%d, %d).\n", clients->player_table[id].id, ipstr, xpos, ypos);
+        outlen = server_move(outgoing, clients->player_table[id].id, xpos, ypos);
+        send_to_all(clients, outgoing, outlen);
+    } else {
+        printf("Player%d (%s) sent unexpected command `%s` -> KICKED\n", clients->player_table[id].id, ipstr, cmd);
+        outlen = server_kick(outgoing, "unknown_command");
+        SDLNet_TCP_Send(client, outgoing, outlen);
+        outlen = server_quit(outgoing, clients->player_table[id].id);
+        kill_connection(clients, id);
+        send_to_all(clients, outgoing, outlen);
     }
 }
 
@@ -133,27 +150,11 @@ void kill_connection(ClientList* clients, int cid) {
     remove_client(clients, cid);
 }
 
-void kick_invalid_cmd(ClientList* clients, int cid) {
-    TCPsocket client = clients->player_table[cid].sock;
-    uint8_t kick_msg[] = {'K', 'I', 'C', 'K', 0, 8, 'I', 'N', 'V', '_', 'C', 'M', 'D', '\0', '\n'};
-    SDLNet_TCP_Send(client, kick_msg, 15);
-}
-
-void send_quit(ClientList* clients, int cid) {
-    uint8_t quit_msg[] = {'Q', 'U', 'I', 'T', 0, 4, (uint8_t) clients->player_table[cid].id, '\n'};
-    send_to_all(clients, quit_msg, 8);
-}
-
 void send_to_all(ClientList* clients, uint8_t* msg, int len) {
     for (int i = 0; i < clients->active; i++) {
         TCPsocket client = clients->player_table[i].sock;
         SDLNet_TCP_Send(client, msg, len);
     }
-}
-
-void send_byee(ClientList* clients, int cid) {
-    uint8_t byee_msg[] = {'B', 'Y', 'E', 'E', 0, 0, '\n'};
-    SDLNet_TCP_Send(clients->player_table[cid].sock, byee_msg, 7);
 }
 
 void addrtocstr(IPaddress* ip, char str[24]) {

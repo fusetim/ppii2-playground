@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "helper.h": "c",
+        "cmd.h": "c",
+        "cstdint": "c"
+    }
+}

@@ -23,9 +23,27 @@ try:
 except:
     print("No data received")
 
+client.send(b"MOVE\0\4\0\x08\0\x16\n")
+
+try:
+    client.settimeout(1.0)
+    data = client.recv(1024)
+    print(data)
+except:
+    print("No data received")
+
 time.sleep(1)
 
-client.send(b"QUIT\0\0\n")
+try:
+    client.settimeout(1.0)
+    data = client.recv(1024)
+    print(data)
+except:
+    print("No data received")
+
+time.sleep(1)
+
+client.send(b"QUIL\0\0\n")
 
 try:
     client.settimeout(1.0)
